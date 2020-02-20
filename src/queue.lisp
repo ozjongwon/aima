@@ -215,11 +215,12 @@
 ;;;
 ;;; Public API
 ;;;
-(defun make-queue (queue-type min-max-key key-fn)
+(defun make-queue (queue-type &key min-max-key key-fn)
   (let ((comp-fn (if (eq :min min-max-key)
                      #'>
                      #'<)))
     (ecase queue-type
+      (:fifo (%make-fifo))
       (:heap (%make-heap :n 0 :vector (vector nil) :comp-fn comp-fn :key-fn key-fn))
       (:fibonacci-heap (%make-fibonacci-heap :comp-fn comp-fn :key-fn key-fn)))))
 
@@ -251,6 +252,40 @@
       (setf (fibonacci-node-parent root) nil
             (fibonacci-node-degree root) 0))
     (fibonacci-node-elem root)))
+
+;;;
+;;; FIFO
+;;;
+(defstruct (fifo (:constructor %make-fifo))
+  (n 0 :type fixnum)
+  (list () :type list))
+
+(defmethod queue-empty? ((queue fifo))
+  (null (fifo-list queue)))
+
+(defmethod queue-put ((queue fifo) elem)
+  (with-slots (list)
+      queue
+    (setf list (nconc list (list elem)))))
+
+(defmethod queue-get ((queue fifo))
+  (pop (fifo-list queue)))
+
+;;;
+;;; LIFO
+;;;
+(defstruct (lifo (:constructor %make-lifo))
+  (n 0 :type fixnum)
+  (list () :type list))
+
+(defmethod queue-empty? ((stack lifo))
+  (null (lifo-list stack)))
+
+(defmethod queue-put ((stack lifo) elem)
+  (push elem (lifo-list stack)))
+
+(defmethod queue-get ((stack lifo))
+  (pop (lifo-list stack)))
 
 
 ;; (setf fh1 (make-queue :fibonacci-heap :max #'identity))
