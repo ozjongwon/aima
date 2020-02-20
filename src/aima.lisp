@@ -2,7 +2,33 @@
 
 (defstruct problem states initial-state actions transition-model goal-test path-cost)
 
-(defstruct node key value path-cost)
+(defmethod result ((problem problem) state action)
+  (with-slots (transition-model)
+      problem
+    ;; generate the next state
+    state action
+    ))
+
+(defmethod step-cost ((problem problem) state action)
+  (with-slots (path-cost)
+      problem
+    ;; compute a step cost of sate + action
+    state action
+    ))
+
+(defstruct (node (:constructor %make-node))
+  state
+  (parent nil :type (or nil node))
+  (action nil :type keyword)
+  (path-cost most-positive-fixnum :type fixnum))
+
+(defun child-node (problem parent action)
+  (with-slots ((parent-state state) path-cost)
+      parent
+    (%make-node :state (result problem parent-state action)
+                :parent parent
+                :action action
+                :path-cost (+ path-cost (step-cost problem parent-state action)))))
 
 (defstruct (frontier-queue (:constructor %make-frontier-queue))
   (queue nil :type (or heap fibonacci-heap fifo lifo))
@@ -92,5 +118,5 @@
                do (queue-put frontierq child)
                else
                do (let ((existing-node (peek-from-frontier frontierq child)))
-                    (when (and existing-node (< (path-cost child) (path-cost existing-node)))
+                    (when (and existing-node (< (node-path-cost child) (node-path-cost existing-node)))
                       (update-frontier frontierq child))))))))
