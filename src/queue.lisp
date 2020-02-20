@@ -264,12 +264,17 @@
   (null (fifo-list queue)))
 
 (defmethod queue-put ((queue fifo) elem)
-  (with-slots (list)
+  (with-slots (n list)
       queue
-    (setf list (nconc list (list elem)))))
+    (setf list (nconc list (list elem)))
+    (incf n)))
 
 (defmethod queue-get ((queue fifo))
-  (pop (fifo-list queue)))
+  (with-slots (n list)
+      queue
+    (assert (plusp n) nil "FIFO underflow")
+    (decf n)
+    (pop list)))
 
 ;;;
 ;;; LIFO
@@ -282,10 +287,17 @@
   (null (lifo-list stack)))
 
 (defmethod queue-put ((stack lifo) elem)
-  (push elem (lifo-list stack)))
+  (with-slots (n list)
+      stack
+    (push elem list)
+    (incf n)))
 
 (defmethod queue-get ((stack lifo))
-  (pop (lifo-list stack)))
+  (with-slots (n list)
+      stack
+    (assert (plusp n) nil "LIFO underflow")
+    (decf n)
+    (pop list)))
 
 
 ;; (setf fh1 (make-queue :fibonacci-heap :max #'identity))
