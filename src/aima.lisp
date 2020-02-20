@@ -1,6 +1,12 @@
 (in-package :algorithm)
 
-(defstruct problem states initial-state actions transition-model goal-test path-cost)
+(defstruct problem
+  states
+  initial-state
+  actions
+  transition-model
+  goal-test
+  (path-cost 0 :type fixnum))
 
 (defmethod result ((problem problem) state action)
   (with-slots (transition-model)
@@ -16,19 +22,39 @@
     state action
     ))
 
-(defstruct (node (:constructor %make-node))
+(defmethod actions ((problem problem) state)
+  (with-slots (actions)
+      problem)
+  ;; compute available actions
   state
-  (parent nil :type (or nil node))
-  (action nil :type keyword)
-  (path-cost most-positive-fixnum :type fixnum))
+  )
+
+(defmethod goal-test ((problem problem) state)
+    (with-slots (goal-test)
+        problem
+      ;;compute true or false?
+      state))
+
+(defstruct node
+  state
+  (parent nil :type (or null node))
+  (action nil :type (or null keyword))
+  (path-cost 0 :type fixnum))
 
 (defun child-node (problem parent action)
   (with-slots ((parent-state state) path-cost)
       parent
-    (%make-node :state (result problem parent-state action)
-                :parent parent
-                :action action
-                :path-cost (+ path-cost (step-cost problem parent-state action)))))
+    (make-node :state (result problem parent-state action)
+               :parent parent
+               :action action
+               :path-cost (+ path-cost (step-cost problem parent-state action)))))
+
+(defun solution (end-node)
+  (loop with actions = ()
+     for node = end-node then (node-parent node)
+     while node
+     do (push (node-action node) actions)
+     finally (return actions)))
 
 (defstruct (frontier-queue (:constructor %make-frontier-queue))
   (queue nil :type (or heap fibonacci-heap fifo lifo))
@@ -41,38 +67,36 @@
       fq
     (queue-empty? queue)))
 
-(defmethod queue-put ((fq frontier-queue) elem)
-  (with-slots (queue frontier key-fn)
+(defmethod queue-put ((fq frontier-queue) node)
+  (with-slots (queue frontier)
       fq
-    (let ((elem-key (funcall key-fn elem)))
-      (queue-put queue elem-key)
-      (setf (gethash elem-key frontier) elem))))
+    (queue-put queue node)
+    (setf (gethash (node-state node) frontier) node)))
 
 (defmethod queue-get ((fq frontier-queue))
-  (with-slots (queue frontier explored key-fn)
+  (with-slots (queue frontier explored)
       fq
-    (let* ((elem-key (queue-get queue))
-           (elem (gethash elem-key explored)))
-      (remhash elem-key frontier)
-      (setf (gethash elem-key explored) t)
-      elem)))
+    (let* ((node (queue-get queue))
+           (state (node-state node)))
+      (remhash state frontier)
+      (setf (gethash state explored) t)
+      node)))
 
 (defmethod ready-to-explore? ((fq frontier-queue) elem)
-  (with-slots (frontier explored key-fn)
+  (with-slots (frontier explored)
       fq
-    (let ((key (funcall key-fn elem)))
-      (not (or (gethash key frontier) (gethash key explored))))))
+    (let ((state (node-state elem)))
+      (not (or (gethash state frontier) (gethash state explored))))))
 
-(defmethod peek-from-frontier ((fq frontier-queue) elem)
-  (with-slots (frontier key-fn)
+(defmethod peek-frontier-node-by-state ((fq frontier-queue) state)
+  (with-slots (frontier)
       fq
-    (gethash (funcall key-fn elem) frontier)))
+    (gethash state frontier)))
 
-(defmethod update-frontier ((fq frontier-queue) new)
-  (with-slots (frontier key-fn)
-      fq
-    (let ((key (funcall key-fn new)))
-     (setf (gethash key frontier) new))))
+(defmethod update-existing-frontier-node (existing-node new-node)
+  (setf (node-parent existing-node)     (node-parent new-node)
+        (node-action existing-node)     (node-action new-node)
+        (node-path-cost existing-node)  (node-path-cost new-node)))
 
 (defun make-frontier-queue (queue-type &key key-fn)
   (%make-frontier-queue :queue (make-queue queue-type :key-fn key-fn)
@@ -80,21 +104,22 @@
 
 (defun general-search (problem queue-type key-fn)
   (assert (member queue-type '(:fifo :lifo)))
-  (with-slots (initial-state goal-test actions)
+  (with-slots (initial-state)
       problem
-    (when (funcall goal-test initial-state)
-      (return-from general-search initial-state))
-    (let ((frontierq (make-frontier-queue queue-type :key-fn key-fn)))
-      (queue-put frontierq initial-state)
-      (loop until (queue-empty? frontierq)
-         as node = (queue-get frontierq)
-         do (loop for action in (funcall actions node)
-               and child = (child-node problem node action)
-               when (ready-to-explore? frontierq child)
-               ;; Goal test immediately before put into frontier
-               do (if (funcall goal-test child)
-                      (return-from general-search child)
-                      (queue-put frontierq child)))))))
+    (let ((node (make-node :state initial-state)))
+      (when (goal-test problem initial-state)
+        (return-from general-search (solution node)))
+      (let ((frontierq (make-frontier-queue queue-type :key-fn key-fn)))
+        (queue-put frontierq node)
+        (loop until (queue-empty? frontierq)
+           as node = (queue-get frontierq)
+           do (loop for action in (actions problem (node-state node))
+                 and child = (child-node problem node action)
+                 when (ready-to-explore? frontierq child)
+                 ;; Goal test immediately before put into frontier
+                 do (if (goal-test problem (node-state child))
+                        (return-from general-search child)
+                        (queue-put frontierq child))))))))
 
 (defun breadth-first-search (problem key-fn)
   (general-search problem :fifo key-fn))
@@ -103,21 +128,19 @@
   (general-search problem :lifo key-fn))
 
 (defun uniform-cost-search (problem key-fn)
-  (with-slots (initial-state goal-test actions)
-      problem
-    (let ((frontierq (make-frontier-queue :fibonacci-heap :key-fn key-fn)))
-      (queue-put frontierq initial-state)
-      (loop until (queue-empty? frontierq)
-         as node = (queue-get frontierq)
-         ;; Goal test when frontier expands
-         if (funcall goal-test node)
-         return node
-         else
-         do (loop for action in (funcall actions node)
-               and child = (child-node problem node action)
-               if (ready-to-explore? frontierq child)
-               do (queue-put frontierq child)
-               else
-               do (let ((existing-node (peek-from-frontier frontierq child)))
-                    (when (and existing-node (< (node-path-cost child) (node-path-cost existing-node)))
-                      (update-frontier frontierq child))))))))
+  (let ((frontierq (make-frontier-queue :fibonacci-heap :key-fn key-fn)))
+    (queue-put frontierq (make-node :state (problem-initial-state problem)))
+    (loop until (queue-empty? frontierq)
+       as node = (queue-get frontierq)
+       ;; Goal test when frontier expands
+       if (goal-test problem (node-state node))
+       return (solution node)
+       else
+       do (loop for action in (node-state node)
+             and child = (child-node problem node action)
+             if (ready-to-explore? frontierq child)
+             do (queue-put frontierq child)
+             else
+             do (let ((existing-node (peek-frontier-node-by-state frontierq (node-state child))))
+                  (when (and existing-node (< (node-path-cost child) (node-path-cost existing-node)))
+                    (update-existing-frontier-node existing-node child)))))))
