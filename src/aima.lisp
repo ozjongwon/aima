@@ -88,13 +88,13 @@
       (queue-put frontierq initial-state)
       (loop until (queue-empty? frontierq)
          as node = (queue-get frontierq)
-         do ;;(setf (gethash (funcall key-fn node) explored) t)
-           (loop for action in (funcall actions node)
-              and child = (child-node problem node action)
-              when (ready-to-explore? frontierq child)
-              do (if (funcall goal-test child)
-                     (return-from general-search child)
-                     (queue-put frontierq child)))))))
+         do (loop for action in (funcall actions node)
+               and child = (child-node problem node action)
+               when (ready-to-explore? frontierq child)
+               ;; Goal test immediately before put into frontier
+               do (if (funcall goal-test child)
+                      (return-from general-search child)
+                      (queue-put frontierq child)))))))
 
 (defun breadth-first-search (problem key-fn)
   (general-search problem :fifo key-fn))
@@ -109,6 +109,7 @@
       (queue-put frontierq initial-state)
       (loop until (queue-empty? frontierq)
          as node = (queue-get frontierq)
+         ;; Goal test when frontier expands
          if (funcall goal-test node)
          return node
          else
