@@ -30,7 +30,7 @@
        do
          (rotatef (svref vector parent-idx) (svref vector idx)))))
 
-;;(setf h1 (make-queue :heap :min #'identity))
+;;(setf h1 (make-queue :heap :min-max-key :min :key-fn #'identity))
 
 (defun %sink (heap k)
   (with-slots (n vector)
@@ -89,7 +89,7 @@
         (%resize heap (floor vlen 2)))
       top-elem)))
 
-;; (setf h1 (make-queue :heap :max #'identity))
+;; (setf h1 (make-queue :heap :min-max-key :max :key-fn #'identity))
 ;; (dolist (elem '("O" "R" "T" "E" "X" "A" "M" "P" "L" "E"))
 ;;   (queue-put h1 elem))
 
@@ -300,7 +300,7 @@
     (pop list)))
 
 
-;; (setf fh1 (make-queue :fibonacci-heap :max #'identity))
+;; (setf fh1 (make-queue :fibonacci-heap :min-max-key :max :key-fn #'identity))
 ;; (dolist (elem (list 23 7 21 3 18 52 38 39 41 17 30 24 26 46 35))
 ;;   (queue-put fh1 elem))
 ;;
@@ -337,19 +337,19 @@
 ;;              (format t "> GET~&")
 ;;              (time (dotimes (i n)
 ;;                      (queue-get heap)))))
-;;     (heap-n-put-get (make-queue :heap :min #'identity) 1000)
-;;     (heap-n-put-get (make-queue :fibonacci-heap :min #'identity) 1000)
-;;     (heap-n-put-get (make-queue :heap :min #'identity) 10000)
-;;     (heap-n-put-get (make-queue :fibonacci-heap :min #'identity) 10000)
-;;     (heap-n-put-get (make-queue :heap :min #'identity) 100000)
-;;     (heap-n-put-get (make-queue :fibonacci-heap :min #'identity) 100000)
-;;     (heap-n-put-get (make-queue :heap :min #'identity) 1000000)
-;;     (heap-n-put-get (make-queue :fibonacci-heap :min #'identity) 1000000)
+;;     (heap-n-put-get (make-queue :heap :min-max-key :min :key-fn #'identity) 1000)
+;;     (heap-n-put-get (make-queue :fibonacci-heap :min-max-key :min :key-fn #'identity) 1000)
+;;     (heap-n-put-get (make-queue :heap :min-max-key :min :key-fn #'identity) 10000)
+;;     (heap-n-put-get (make-queue :fibonacci-heap :min-max-key :min :key-fn #'identity) 10000)
+;;     (heap-n-put-get (make-queue :heap :min-max-key :min :key-fn #'identity) 100000)
+;;     (heap-n-put-get (make-queue :fibonacci-heap :min-max-key :min :key-fn #'identity) 100000)
+;;     (heap-n-put-get (make-queue :heap :min-max-key :min :key-fn #'identity) 1000000)
+;;     (heap-n-put-get (make-queue :fibonacci-heap :min-max-key :min :key-fn #'identity) 1000000)
 ;;     nil))
 ;;
 ;; (defun test-queues (n)
-;;   (let ((q1 (make-queue :heap :min #'identity))
-;;         (q2 (make-queue :fibonacci-heap :min #'identity))
+;;   (let ((q1 (make-queue :heap :min-max-key :min :key-fn #'identity))
+;;         (q2 (make-queue :fibonacci-heap :min-max-key :min :key-fn #'identity))
 ;;         (random-list (loop repeat n
 ;;                           collect (random 100.0))))
 ;;     (dolist (x random-list)
