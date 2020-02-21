@@ -28,10 +28,10 @@
     state action
     ))
 
-(defgeneric heuristic-function (search-type problem node action)
+(defgeneric heuristic-function (problem node action child-state)
   (:documentation "Heuristic function for A*. 0 for non A* algorithms")
-  (:method (search-type problem node action)
-    (declare (ignore search-type problem node action))
+  (:method (problem node action child-state)
+    (declare (ignore problem node action child-state))
     0))
 
 (defgeneric applicable-actions (problem state)
@@ -62,20 +62,20 @@
   action
   (path-cost 0 :type fixnum))
 
-(defun child-node (problem parent action &optional search-type)
-  ;; search-type: :uniform-cost, :a-star
+(defun child-node (problem parent action)
   (with-slots ((parent-state state) path-cost)
       parent
-    (make-node :state (state+action->next-state problem parent-state action)
-               :parent parent
-               :action action
-               ;; For uniform-cost-search, this is g(n)
-               ;; FIXME: f(n) = g(n) + h(n) ---> A*
-               :path-cost (+ path-cost
-                             ;; g(n)
-                             (state-transition-cost problem parent-state action)
-                             ;; h(n), for non :a-star searches, 0
-                             (heuristic-function search-type problem parent action)))))
+    (let ((child-state (state+action->next-state problem parent-state action)))
+      (make-node :state child-state
+                 :parent parent
+                 :action action
+                 ;; For uniform-cost-search, this is g(n)
+                 ;; A* f(n) = g(n) + h(n)
+                 :path-cost (+ path-cost
+                               ;; g(n)
+                               (state-transition-cost problem parent-state action)
+                               ;; h(n), for non A* searches, 0
+                               (heuristic-function problem parent action child-state))))))
 
 (defstruct (frontier-queue (:constructor %make-frontier-queue))
   (queue nil :type (or heap fibonacci-heap fifo lifo))
@@ -146,9 +146,8 @@
 (defun depth-first-search (problem)
   (general-search problem :lifo))
 
-(defun cost-based-search (problem heap-type search-type)
+(defun cost-based-search (problem heap-type)
   ;; heap-type: :fibonacci-heap, :heap
-  ;; search-type: :uniform-cost, :a-star
   (let ((frontierq (make-frontier-queue heap-type)))
     (queue-put frontierq (make-node :state (problem-initial-state problem)))
     (loop until (queue-empty? frontierq)
@@ -158,17 +157,13 @@
        return (solution problem node)
        else
        do (loop for action in (applicable-actions problem (node-state node))
-             as child = (child-node problem node action search-type)
+             as child = (child-node problem node action)
              if (ready-to-explore? frontierq child)
              do (queue-put frontierq child)
              else
              do (when-let ((existing-node (peek-frontier-node-by-state frontierq (node-state child))))
                   (when (< (node-path-cost child) (node-path-cost existing-node))
                     (update-existing-frontier-node existing-node child)))))))
-
-(defun uniform-cost-search (problem heap-type)
-  (cost-based-search problem heap-type :uniform-cost))
-
 
 ;;;;;;;;;;;;;
 (defconstant +maze-map+
@@ -218,33 +213,33 @@
     (ecase algorithm
       (:fifo (breadth-first-search maze))
       (:lifo (depth-first-search maze))
-      ((:fibonacci-heap :heap) (uniform-cost-search maze algorithm)))))
+      ((:fibonacci-heap :heap) (cost-based-search maze algorithm)))))
+
+
+(defun get-state-neighbours (transition-model state)
+  (first (last (assoc state transition-model))))
+
+(defun pick-state-neighbour-info (transition-model state idx)
+  (when-let ((found (get-state-neighbours transition-model state)))
+    (nth idx found)))
 
 (defmethod state+action->next-state ((problem simple-maze) state action)
-    ;; action == position index
-    (with-slots (transition-model)
-        problem
-      (when-let ((found (assoc state transition-model)))
-        (car (nth action (second found))))))
+  ;; action == position index
+  (with-slots (transition-model)
+      problem
+    (car (pick-state-neighbour-info transition-model state action))))
 
 (defmethod state-transition-cost ((problem simple-maze) state action)
   (with-slots (algorithm transition-model)
       problem
     (if (member algorithm '(:fifo :lifo))
-        (let ((found (assoc state transition-model)))
-          (cdr (nth action (second found))))
-        0)))
+        0
+        (cdr (pick-state-neighbour-info transition-model state action)))))
 
 (defmethod applicable-actions ((problem simple-maze) state)
   (with-slots (algorithm transition-model)
       problem
-    (range (length (second (assoc state transition-model))))
-    #+XXX
-    (let* ((found (assoc state transition-model))
-           (indexes (range (length (second found)))))
-      (if (eq algorithm :lifo)
-          (reverse indexes)
-          indexes))))
+    (range (length (get-state-neighbours transition-model state)))))
 
 (defmethod state-satisfies-goal? ((problem simple-maze) state)
   (with-slots (goal-test)
@@ -283,7 +278,8 @@
                                 :goal-test (n-puzzle-state (range len)))))
     (ecase algorithm
       (:fifo (breadth-first-search puzzle))
-      (:lifo (depth-first-search puzzle)))))
+      (:lifo (depth-first-search puzzle))
+      ((:heap :fibonacci-heap) (cost-based-search puzzle algorithm)))))
 
 
 (defmethod state+action->next-state ((problem n-puzzle) state action)
@@ -331,9 +327,15 @@
      do (push (node-action node) actions)
      finally (return actions)))
 
+
+(defmethod heuristic-function ((problem n-puzzle) parent action child-state)
+  (declare (ignore parent action))
+  (loop for n across child-state
+     and i from 0
+     count (not (= n i))))
+
 ;;(solve-n-puzzle :fifo (n-puzzle-state '(1 2 5 3 4 0 6 7 8)))
-#+XXX
-(defparameter *romania-map-with-coordination*
+(defparameter +romania-map-with-coord+
   '(
     (Arad       ( 91 492) ((Zerind . 75) (Sibiu . 140) (Timisoara . 118)))
     (Bucharest	(400 327) ((Fagaras . 211) (Pitesti . 101) (Giurgiu . 90)
@@ -361,7 +363,29 @@
   "A representation of the map in Figure 4.2 [p 95].
   But note that the straight-line distances to Bucharest are NOT the same.")
 
+(defstruct (romania-maze (:include simple-maze)))
 
-(defmethod heuristic-function ((search-type (eql :a-star)) problem parent action)
-  problem parent action
-  11)
+(defun city-coord (map name)
+  (second (assoc name map)))
+
+(defun solve-maze-heuristically (algorithm map start end)
+  (let ((maze (make-romania-maze :algorithm algorithm :initial-state start :goal-test end :transition-model map)))
+    (ecase algorithm
+      (:fifo (breadth-first-search maze))
+      (:lifo (depth-first-search maze))
+      ((:fibonacci-heap :heap) (cost-based-search maze algorithm)))))
+
+(defmethod heuristic-function ((problem romania-maze) parent action child-state)
+  (declare (ignore parent action))
+  (with-slots (goal-test transition-model)
+      problem
+    (let ((goal-coord (city-coord transition-model goal-test))
+          (child-coord (city-coord transition-model child-state)))
+      (round (sqrt (apply #'+ (mapcar #'(lambda (a b) (expt (- a b) 2)) goal-coord child-coord)))))))
+
+;;
+;; (time (solve-simple-maze :lifo +romania-map-with-coord+ 'Arad 'Bucharest))
+;; (time (solve-simple-maze :fifo +romania-map-with-coord+ 'Arad 'Bucharest))
+;; (time (solve-simple-maze :fibonacci-heap +romania-map-with-coord+ 'Arad 'Bucharest))
+;; (time (solve-simple-maze :heap +romania-map-with-coord+ 'Arad 'Bucharest))
+;;
