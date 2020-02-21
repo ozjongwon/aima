@@ -165,11 +165,14 @@
     (h ((f . 2) (g . 7)))))
 
 (defstruct (simple-maze (:include problem))
-  (transition-cost? nil :type boolean))
+  (algorithm nil :type keyword))
 
-(defparameter *simple-maze-bfs* (make-simple-maze :initial-state 's :goal-test 'g))
-(defparameter *simple-maze-dfs* (make-simple-maze :initial-state 's :goal-test 'g))
-(defparameter *simple-maze-ucs* (make-simple-maze :initial-state 's :goal-test 'g :transition-cost? t))
+(defun solve-maze (algorithm)
+  (let ((maze (make-simple-maze :algorithm algorithm :initial-state 's :goal-test 'g)))
+    (ecase algorithm
+      (:fifo (breadth-first-search maze))
+      (:lifo (depth-first-search maze))
+      ((:fibonacci-heap :heap) (uniform-cost-search maze)))))
 
 (defmethod state+action->next-state ((problem simple-maze) state action)
   ;; action == position index
@@ -177,14 +180,21 @@
     (car (nth action (second found)))))
 
 (defmethod state-transition-cost ((problem simple-maze) state action)
-  (if (simple-maze-transition-cost? problem)
-      (let ((found (assoc state +maze-map+)))
-        (cdr (nth action (second found))))
-      0))
+  (with-slots (algorithm)
+      problem
+    (if (member algorithm '(:fifo :lifo))
+        (let ((found (assoc state +maze-map+)))
+          (cdr (nth action (second found))))
+        0)))
 
 (defmethod applicable-actions ((problem simple-maze) state)
   (let ((found (assoc state +maze-map+)))
-    (range (length (second found)))))
+    (with-slots (algorithm)
+        problem
+      (let ((indexes (range (length (second found)))))
+        (if (eq algorithm :lifo)
+            (reverse indexes)
+            indexes)))))
 
 (defmethod state-satisfies-goal? ((problem simple-maze) state)
   (with-slots (goal-test)
