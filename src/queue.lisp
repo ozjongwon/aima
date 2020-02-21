@@ -221,6 +221,7 @@
                      #'<)))
     (ecase queue-type
       (:fifo (%make-fifo))
+      (:lifo (%make-lifo))
       (:heap (%make-heap :n 0 :vector (vector nil) :comp-fn comp-fn :key-fn key-fn))
       (:fibonacci-heap (%make-fibonacci-heap :comp-fn comp-fn :key-fn key-fn)))))
 
