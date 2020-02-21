@@ -167,34 +167,66 @@
 (defstruct (simple-maze (:include problem))
   (algorithm nil :type keyword))
 
-(defun solve-maze (algorithm)
-  (let ((maze (make-simple-maze :algorithm algorithm :initial-state 's :goal-test 'g)))
+(defconstant +romania-map+
+  '(
+    (Arad      ((Zerind . 75) (Sibiu . 140) (Timisoara . 118)))
+    (Bucharest ((Fagaras . 211) (Pitesti . 101) (Giurgiu . 90)
+                (Urziceni . 85)))
+    (Craiova   ((Dobreta . 120) (Rimnicu . 146) (Pitesti . 138)))
+    (Dobreta   ((Mehadia . 75) (Craiova . 120)))
+    (Eforie    ((Hirsova . 86)))
+    (Fagaras   ((Sibiu . 99) (Bucharest . 211)))
+    (Giurgiu   ((Bucharest . 90)))
+    (Hirsova   ((Urziceni . 98) (Eforie . 86)))
+    (Iasi      ((Neamt . 87) (Vaslui . 92)))
+    (Lugoj     ((Timisoara . 111) (Mehadia . 70)))
+    (Mehadia   ((Lugoj . 70) (Dobreta . 75)))
+    (Neamt     ((Iasi . 87)))
+    (Oradea    ((Zerind . 71) (Sibiu . 151)))
+    (Pitesti   ((Rimnicu . 97) (Craiova . 138) (Bucharest . 101)))
+    (Rimnicu   ((Sibiu . 80) (Pitesti . 97) (Craiova . 146)))
+    (Sibiu     ((Arad . 140) (Oradea . 151) (Fagaras . 99)
+                (Rimnicu . 80)))
+    (Timisoara ((Arad . 118) (Lugoj . 111)))
+    (Urziceni  ((Bucharest . 85) (Hirsova . 98) (Vaslui . 142)))
+    (Vaslui    ((Iasi . 92) (Urziceni . 142)))
+    (Zerind    ((Arad . 75) (Oradea . 71)))
+    )
+  "A representation of the map in Figure 4.2 [p 95].
+  But note that the straight-line distances to Bucharest are NOT the same.")
+
+(defun solve-simple-maze (algorithm map start end)
+  (let ((maze (make-simple-maze :algorithm algorithm :initial-state start :goal-test end :transition-model map)))
     (ecase algorithm
       (:fifo (breadth-first-search maze))
       (:lifo (depth-first-search maze))
       ((:fibonacci-heap :heap) (uniform-cost-search maze)))))
 
 (defmethod state+action->next-state ((problem simple-maze) state action)
-  ;; action == position index
-  (when-let ((found (assoc state +maze-map+)))
-    (car (nth action (second found)))))
+    ;; action == position index
+    (with-slots (transition-model)
+        problem
+      (when-let ((found (assoc state transition-model)))
+        (car (nth action (second found))))))
 
 (defmethod state-transition-cost ((problem simple-maze) state action)
-  (with-slots (algorithm)
+  (with-slots (algorithm transition-model)
       problem
     (if (member algorithm '(:fifo :lifo))
-        (let ((found (assoc state +maze-map+)))
+        (let ((found (assoc state transition-model)))
           (cdr (nth action (second found))))
         0)))
 
 (defmethod applicable-actions ((problem simple-maze) state)
-  (let ((found (assoc state +maze-map+)))
-    (with-slots (algorithm)
-        problem
-      (let ((indexes (range (length (second found)))))
-        (if (eq algorithm :lifo)
-            (reverse indexes)
-            indexes)))))
+  (with-slots (algorithm transition-model)
+      problem
+    (range (length (second (assoc state transition-model))))
+    #+XXX
+    (let* ((found (assoc state transition-model))
+           (indexes (range (length (second found)))))
+      (if (eq algorithm :lifo)
+          (reverse indexes)
+          indexes))))
 
 (defmethod state-satisfies-goal? ((problem simple-maze) state)
   (with-slots (goal-test)
@@ -208,6 +240,77 @@
      do (push (node-state node) states)
      finally (return states)))
 
-;; (depth-first-search *simple-maze-dfs*)
-;; (breadth-first-search *simple-maze-bfs*)
-;; (uniform-cost-search *simple-maze-ucs*)
+;; (solve-simple-maze :fifo +maze-map+ 's 'g)
+;; (solve-simple-maze :lifo +maze-map+ 's 'g)
+;; (solve-simple-maze :heap +maze-map+ 's 'g)
+;; (solve-simple-maze :fibonacci-heap +maze-map+ 's 'g)
+;;
+;; (solve-simple-maze :fifo +romania-map+ 'Arad 'Bucharest)
+;; (solve-simple-maze :lifo +romania-map+ 'Arad 'Bucharest)
+;; (solve-simple-maze :heap +romania-map+ 'Arad 'Bucharest)
+;; (solve-simple-maze :fibonacci-heap +romania-map+ 'Arad 'Bucharest)
+
+(defstruct (n-puzzle (:include problem))
+  (sqrt-n 0 :type fixnum))
+
+(defun n-puzzle-state (l)
+  (let ((len (length l)))
+   (assert (integerp (sqrt len)))
+   (make-array (list len) :initial-contents l)))
+;; (n-puzzle-state '(1 2 5 3 4 0 6 7 8))
+
+(defun solve-n-puzzle (algorithm start)
+  (let* ((len (length start))
+         (puzzle (make-n-puzzle :initial-state start :sqrt-n (sqrt len)
+                                :goal-test (n-puzzle-state (range len)))))
+    (ecase algorithm
+      (:fifo (breadth-first-search puzzle))
+      (:lifo (depth-first-search puzzle)))))
+
+
+(defmethod state+action->next-state ((problem n-puzzle) state action)
+  ;; action => operation on the blank, 0
+  (with-slots (sqrt-n)
+      problem
+    (let ((next-state (copy-sequence 'vector state))
+          (idx (position 0 state)))
+      (rotatef (svref next-state idx) (svref next-state (ecase action
+                                                          (:down (+ idx sqrt-n))
+                                                          (:up   (- idx sqrt-n))
+                                                          (:left (1- idx))
+                                                          (:right (1+ idx)))))
+      next-state)))
+
+(defmethod state-transition-cost ((problem n-puzzle) state action)
+  (declare (ignore state action))
+  0)
+
+(defmethod applicable-actions ((problem n-puzzle) state)
+  (with-slots (sqrt-n)
+      problem
+    (let* ((actions ())
+           (idx (position 0 state))
+           (quot (mod idx sqrt-n)))
+      (when (< quot (1- sqrt-n))
+        (push :right actions))
+      (when (< 0 quot)
+        (push :left actions))
+      (when (<= sqrt-n idx)
+        (push :up actions))
+      (when (< idx (- (length state) sqrt-n))
+        (push :down actions))
+      actions)))
+
+(defmethod state-satisfies-goal? ((problem n-puzzle) state)
+  (with-slots (goal-test)
+      problem
+    (equalp goal-test state)))
+
+(defmethod solution ((problem n-puzzle) end-node)
+  (loop with actions = ()
+     for node = end-node then (node-parent node)
+     while node
+     do (push (node-action node) actions)
+     finally (return actions)))
+
+;;(solve-n-puzzle :fifo (n-puzzle-state '(1 2 5 3 4 0 6 7 8)))
