@@ -167,6 +167,32 @@
                   (when (< (node-path-cost child) (node-path-cost existing-node))
                     (update-existing-frontier-node existing-node child)))))))
 
+;;;;
+;;;;
+;;;;
+(defun depth-limited-search (problem limit)
+  (recursive-dls (make-node :state (problem-initial-state problem)) problem limit))
+
+(defun recursive-dls (node problem limit)
+  (cond ((state-satisfies-goal? problem (node-state node))
+         (solution problem node))
+        ((zerop limit) :cutoff)
+        (t (loop with cutoff-occurred? = nil
+              for action in (applicable-actions problem (node-state node))
+              as child = (child-node problem node action)
+              as result = (recursive-dls child problem (1- limit))
+              if (eq result :cutoff)
+              do (setf cutoff-occurred? t)
+              else when result return result
+              finally (when cutoff-occurred?
+                        (return-from recursive-dls :cutoff))))))
+
+(defun iterative-deepening-search (problem)
+  (loop for depth = 0 then (incf depth)
+     as result = (depth-limited-search problem depth)
+     unless (eq result :cutoff)
+     return result))
+
 ;;;;;;;;;;;;;
 (defconstant +maze-map+
   '((s ((a . 6) (b . 2) (c . 5)))
@@ -216,7 +242,8 @@
       (:breadth-first (breadth-first-search maze))
       (:depth-first (depth-first-search maze))
       ((:uniform-cost :a*) (cost-based-search maze search-type queue-type))
-      (:rbfs (recursive-best-first-search maze queue-type)))))
+      (:rbfs (recursive-best-first-search maze queue-type))
+      (:ids (iterative-deepening-search maze)))))
 
 (defun get-state-neighbours (transition-model state)
   (first (last (assoc state transition-model))))
@@ -288,12 +315,14 @@
       (:breadth-first (breadth-first-search puzzle))
       (:depth-first (depth-first-search puzzle))
       ((:uniform-cost :a*) (cost-based-search puzzle search-type queue-type))
-      (:rbfs (recursive-best-first-search puzzle queue-type)))))
+      (:rbfs (recursive-best-first-search puzzle queue-type))
+      (:ids (iterative-deepening-search puzzle)))))
 
 ;;
 ;; (time (solve-n-puzzle :breadth-first (n-puzzle-state '(7 2 4 5 0 6 8 3 1)) :fibonacci-heap))
 ;; (time (solve-n-puzzle :a* (n-puzzle-state '(7 2 4 5 0 6 8 3 1)) :fibonacci-heap))
 ;; (time (solve-n-puzzle :uniform-cost (n-puzzle-state '(7 2 4 5 0 6 8 3 1)) :fibonacci-heap))
+;; (time (solve-n-puzzle :ids (n-puzzle-state '(7 2 4 5 0 6 8 3 1))))
 ;;
 
 
@@ -365,6 +394,7 @@
 ;; (solve-n-puzzle :uniform-cost (n-puzzle-state '(7 2 4 5 0 6 8 3 1)) :heap)
 ;; (solve-n-puzzle :a* (n-puzzle-state '(7 2 4 5 0 6 8 3 1)) :heap)
 ;; (solve-n-puzzle :breadth-first (n-puzzle-state '(7 2 4 5 0 6 8 3 1)) :heap)
+;; (solve-n-puzzle :ids (n-puzzle-state '(7 2 4 5 0 6 8 3 1)) :heap)
 
 (defparameter +romania-map-with-coord+
   '(
@@ -462,6 +492,9 @@
       (:breadth-first (breadth-first-search maze))
       (:depth-first (depth-first-search maze))
       ((:uniform-cost :a*) (cost-based-search maze search-type queue-type))
-      (:rbfs (recursive-best-first-search maze queue-type)))))
+      (:rbfs (recursive-best-first-search maze queue-type))
+      (:ids (iterative-deepening-search maze)))))
 
 ;;(time (solve-maze-heuristically :uniform-cost +romania-map-with-coord+ 'Arad 'Bucharest :heap))
+;;(time (solve-maze-heuristically :a* +romania-map-with-coord+ 'Arad 'Bucharest :heap))
+;;(time (solve-maze-heuristically :ids +romania-map-with-coord+ 'Arad 'Bucharest :heap))
