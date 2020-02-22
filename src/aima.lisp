@@ -62,7 +62,7 @@
   action
   (path-cost 0 :type fixnum))
 
-(defun child-node (problem parent action)
+(defun child-node (problem parent action &optional search-type)
   (with-slots ((parent-state state) path-cost)
       parent
     (let ((child-state (state+action->next-state problem parent-state action)))
@@ -75,7 +75,9 @@
                                ;; g(n)
                                (state-transition-cost problem parent-state action)
                                ;; h(n), for non A* searches, 0
-                               (heuristic-function problem parent action child-state))))))
+                               (if (eq search-type :a*)
+                                   (heuristic-function problem parent action child-state)
+                                   0))))))
 
 (defstruct (frontier-queue (:constructor %make-frontier-queue))
   (queue nil :type (or heap fibonacci-heap fifo lifo))
@@ -146,7 +148,7 @@
 (defun depth-first-search (problem)
   (general-search problem :lifo))
 
-(defun cost-based-search (problem queue-type)
+(defun cost-based-search (problem search-type queue-type)
   ;; queue-type: :fibonacci-heap, :heap
   (let ((frontierq (make-frontier-queue queue-type)))
     (queue-put frontierq (make-node :state (problem-initial-state problem)))
@@ -157,7 +159,7 @@
        return (solution problem node)
        else
        do (loop for action in (applicable-actions problem (node-state node))
-             as child = (child-node problem node action)
+             as child = (child-node problem node action search-type)
              if (ready-to-explore? frontierq child)
              do (queue-put frontierq child)
              else
@@ -213,7 +215,7 @@
     (ecase search-type
       (:breadth-first (breadth-first-search maze))
       (:depth-first (depth-first-search maze))
-      ((:uniform-cost :a*) (cost-based-search maze queue-type))
+      ((:uniform-cost :a*) (cost-based-search maze search-type queue-type))
       (:rbfs (recursive-best-first-search maze queue-type)))))
 
 (defun get-state-neighbours (transition-model state)
@@ -285,7 +287,7 @@
     (ecase search-type
       (:breadth-first (breadth-first-search puzzle))
       (:depth-first (depth-first-search puzzle))
-      ((:uniform-cost :a*) (cost-based-search puzzle queue-type))
+      ((:uniform-cost :a*) (cost-based-search puzzle search-type queue-type))
       (:rbfs (recursive-best-first-search puzzle queue-type)))))
 
 ;;
@@ -359,7 +361,11 @@
                                   (abs (- a b)))
                               (idx->xy i sqrt-n) (idx->xy n sqrt-n))))))
 
-;;(solve-n-puzzle :fifo (n-puzzle-state '(1 2 5 3 4 0 6 7 8)))
+
+;; (solve-n-puzzle :uniform-cost (n-puzzle-state '(7 2 4 5 0 6 8 3 1)) :heap)
+;; (solve-n-puzzle :a* (n-puzzle-state '(7 2 4 5 0 6 8 3 1)) :heap)
+;; (solve-n-puzzle :breadth-first (n-puzzle-state '(7 2 4 5 0 6 8 3 1)) :heap)
+
 (defparameter +romania-map-with-coord+
   '(
     (Arad       ( 91 492) ((Zerind . 75) (Sibiu . 140) (Timisoara . 118)))
@@ -394,12 +400,14 @@
   (second (assoc name map)))
 
 (defmethod heuristic-function ((problem romania-maze) parent action child-state)
-  (declare (ignore parent action))
+  (declare (ignore action))
   (with-slots (goal-test transition-model)
       problem
     (let ((goal-coord (city-coord transition-model goal-test))
+          (parent-coord (city-coord transition-model (node-state parent)))
           (child-coord (city-coord transition-model child-state)))
-      (round (sqrt (apply #'+ (mapcar #'(lambda (a b) (expt (- a b) 2)) goal-coord child-coord)))))))
+      (floor (- (sqrt (apply #'+ (mapcar #'(lambda (a b) (expt (- a b) 2)) goal-coord child-coord)))
+                (sqrt (apply #'+ (mapcar #'(lambda (a b) (expt (- a b) 2)) goal-coord parent-coord))))))))
 
 ;;
 ;; (time (solve-simple-maze :depth-first +romania-map-with-coord+ 'Arad 'Bucharest))
@@ -453,7 +461,7 @@
     (ecase search-type
       (:breadth-first (breadth-first-search maze))
       (:depth-first (depth-first-search maze))
-      ((:uniform-cost :a*) (cost-based-search maze queue-type))
+      ((:uniform-cost :a*) (cost-based-search maze search-type queue-type))
       (:rbfs (recursive-best-first-search maze queue-type)))))
 
 ;;(time (solve-maze-heuristically :uniform-cost +romania-map-with-coord+ 'Arad 'Bucharest :heap))
