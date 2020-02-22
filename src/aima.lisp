@@ -146,9 +146,9 @@
 (defun depth-first-search (problem)
   (general-search problem :lifo))
 
-(defun cost-based-search (problem heap-type)
-  ;; heap-type: :fibonacci-heap, :heap
-  (let ((frontierq (make-frontier-queue heap-type)))
+(defun cost-based-search (problem queue-type)
+  ;; queue-type: :fibonacci-heap, :heap
+  (let ((frontierq (make-frontier-queue queue-type)))
     (queue-put frontierq (make-node :state (problem-initial-state problem)))
     (loop until (queue-empty? frontierq)
        as node = (queue-get frontierq)
@@ -178,7 +178,7 @@
     (h ((f . 2) (g . 7)))))
 
 (defstruct (simple-maze (:include problem))
-  (algorithm nil :type keyword))
+  (search-type nil :type keyword))
 
 (defconstant +romania-map+
   '(
@@ -208,13 +208,13 @@
   "A representation of the map in Figure 4.2 [p 95].
   But note that the straight-line distances to Bucharest are NOT the same.")
 
-(defun solve-simple-maze (algorithm map start end)
-  (let ((maze (make-simple-maze :algorithm algorithm :initial-state start :goal-test end :transition-model map)))
-    (ecase algorithm
-      (:fifo (breadth-first-search maze))
-      (:lifo (depth-first-search maze))
-      ((:fibonacci-heap :heap) (cost-based-search maze algorithm)))))
-
+(defun solve-simple-maze (search-type map start end &optional queue-type)
+  (let ((maze (make-simple-maze :search-type search-type :initial-state start :goal-test end :transition-model map)))
+    (ecase search-type
+      (:breadth-first (breadth-first-search maze))
+      (:depth-first (depth-first-search maze))
+      ((:uniform-cost :a*) (cost-based-search maze queue-type))
+      (:rbfs (recursive-best-first-search maze queue-type)))))
 
 (defun get-state-neighbours (transition-model state)
   (first (last (assoc state transition-model))))
@@ -223,6 +223,12 @@
   (when-let ((found (get-state-neighbours transition-model state)))
     (nth idx found)))
 
+(defun path->cost (map path)
+  (loop for start in (butlast path)
+     and end in (rest path)
+     as neighbours = (get-state-neighbours map start)
+     sum (cdr (assoc end neighbours))))
+
 (defmethod state+action->next-state ((problem simple-maze) state action)
   ;; action == position index
   (with-slots (transition-model)
@@ -230,14 +236,14 @@
     (car (pick-state-neighbour-info transition-model state action))))
 
 (defmethod state-transition-cost ((problem simple-maze) state action)
-  (with-slots (algorithm transition-model)
+  (with-slots (search-type transition-model)
       problem
-    (if (member algorithm '(:fifo :lifo))
+    (if (member search-type '(:breadth-first :depth-first))
         0
         (cdr (pick-state-neighbour-info transition-model state action)))))
 
 (defmethod applicable-actions ((problem simple-maze) state)
-  (with-slots (algorithm transition-model)
+  (with-slots (transition-model)
       problem
     (range (length (get-state-neighbours transition-model state)))))
 
@@ -272,14 +278,22 @@
    (make-array (list len) :initial-contents l)))
 ;; (n-puzzle-state '(1 2 5 3 4 0 6 7 8))
 
-(defun solve-n-puzzle (algorithm start)
+(defun solve-n-puzzle (search-type start &optional queue-type)
   (let* ((len (length start))
          (puzzle (make-n-puzzle :initial-state start :sqrt-n (sqrt len)
                                 :goal-test (n-puzzle-state (range len)))))
-    (ecase algorithm
-      (:fifo (breadth-first-search puzzle))
-      (:lifo (depth-first-search puzzle))
-      ((:heap :fibonacci-heap) (cost-based-search puzzle algorithm)))))
+    (ecase search-type
+      (:breadth-first (breadth-first-search puzzle))
+      (:depth-first (depth-first-search puzzle))
+      ((:uniform-cost :a*) (cost-based-search puzzle queue-type))
+      (:rbfs (recursive-best-first-search puzzle queue-type)))))
+
+;;
+;; (time (solve-n-puzzle :breadth-first (n-puzzle-state '(7 2 4 5 0 6 8 3 1)) :fibonacci-heap))
+;; (time (solve-n-puzzle :a* (n-puzzle-state '(7 2 4 5 0 6 8 3 1)) :fibonacci-heap))
+;; (time (solve-n-puzzle :uniform-cost (n-puzzle-state '(7 2 4 5 0 6 8 3 1)) :fibonacci-heap))
+;;
+
 
 
 (defmethod state+action->next-state ((problem n-puzzle) state action)
@@ -327,12 +341,23 @@
      do (push (node-action node) actions)
      finally (return actions)))
 
+(defun idx->xy (n sqrt-n)
+  (let ((y (mod n sqrt-n)))
+    (list (/ (- n y) sqrt-n) y)))
 
 (defmethod heuristic-function ((problem n-puzzle) parent action child-state)
   (declare (ignore parent action))
-  (loop for n across child-state
-     and i from 0
-     count (not (= n i))))
+  (with-slots (sqrt-n)
+      problem
+    (loop for n across child-state
+       and i from 0
+       ;; NOTE: don't overestimate to be admissible!
+       unless (or (zerop n) (= n 1))
+       ;; * strategy 1 count misplaced tiles
+       ;; count 1
+       sum (apply #'+ (mapcar #'(lambda (a b) ;; * strategy 2 Manhattan distance
+                                  (abs (- a b)))
+                              (idx->xy i sqrt-n) (idx->xy n sqrt-n))))))
 
 ;;(solve-n-puzzle :fifo (n-puzzle-state '(1 2 5 3 4 0 6 7 8)))
 (defparameter +romania-map-with-coord+
@@ -368,13 +393,6 @@
 (defun city-coord (map name)
   (second (assoc name map)))
 
-(defun solve-maze-heuristically (algorithm map start end)
-  (let ((maze (make-romania-maze :algorithm algorithm :initial-state start :goal-test end :transition-model map)))
-    (ecase algorithm
-      (:fifo (breadth-first-search maze))
-      (:lifo (depth-first-search maze))
-      ((:fibonacci-heap :heap) (cost-based-search maze algorithm)))))
-
 (defmethod heuristic-function ((problem romania-maze) parent action child-state)
   (declare (ignore parent action))
   (with-slots (goal-test transition-model)
@@ -384,8 +402,58 @@
       (round (sqrt (apply #'+ (mapcar #'(lambda (a b) (expt (- a b) 2)) goal-coord child-coord)))))))
 
 ;;
-;; (time (solve-simple-maze :lifo +romania-map-with-coord+ 'Arad 'Bucharest))
-;; (time (solve-simple-maze :fifo +romania-map-with-coord+ 'Arad 'Bucharest))
-;; (time (solve-simple-maze :fibonacci-heap +romania-map-with-coord+ 'Arad 'Bucharest))
-;; (time (solve-simple-maze :heap +romania-map-with-coord+ 'Arad 'Bucharest))
-;;
+;; (time (solve-simple-maze :depth-first +romania-map-with-coord+ 'Arad 'Bucharest))
+;; (time (solve-simple-maze :breadth-first +romania-map-with-coord+ 'Arad 'Bucharest))
+;; (time (solve-simple-maze :uniform-cost +romania-map-with-coord+ 'Arad 'Bucharest :heap))
+;; (time (solve-simple-maze :uniform-cost +romania-map-with-coord+ 'Arad 'Bucharest :fibonacci-heap))
+;; (time (solve-simple-maze :a* +romania-map-with-coord+ 'Arad 'Bucharest :heap))
+;; (time (solve-simple-maze :a* +romania-map-with-coord+ 'Arad 'Bucharest :fibonacci-heap))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defparameter *counter* 0)
+
+(defun recursive-best-first-search (problem queue-type)
+  (setf *counter* 0)
+  (rbfs problem (make-node :state (problem-initial-state problem)) most-positive-fixnum queue-type))
+
+(defun rbfs (problem node f-limit queue-type)
+  (incf *counter*)
+  (when (state-satisfies-goal? problem (node-state node))
+    (return-from rbfs (solution problem node)))
+  (let ((node-f (node-path-cost node))
+        (successors (make-queue queue-type :min-max-key :min :key-fn #'node-path-cost)))
+    ;; Build successors
+    (loop for action in (applicable-actions problem (node-state node))
+       as successor = (child-node problem node action)
+       as cost-f = (node-path-cost successor)
+       when (< cost-f node-f)
+       do (setf (node-path-cost successor) node-f)
+       do (queue-put successors successor))
+    (when (queue-empty? successors)
+      (return-from rbfs `(:failure ,most-positive-fixnum)))
+    ;; main
+    (loop until (queue-empty? successors)
+       as best = (queue-get successors)
+       as best-f = (node-path-cost best)
+       when (> best-f f-limit)
+       return `(:failure ,best-f)
+       do (when-let ((alternative (and (not (queue-empty? successors))
+                                       (node-path-cost (queue-get successors)))))
+            (let* ((result (rbfs problem best (min f-limit alternative) queue-type)))
+              (unless (eq (first result) :failure)
+                (return-from rbfs result))))
+         finally (return best)
+         #+XX(let* ((alternative (node-path-cost (queue-get successors)))
+                    (result (rbfs problem best (min f-limit alternative) queue-type)))
+               (unless (eq (first result) :failure)
+                 (return-from rbfs result))))))
+
+(defun solve-maze-heuristically (search-type map start end &optional queue-type)
+  (let ((maze (make-romania-maze :search-type search-type :initial-state start :goal-test end :transition-model map)))
+    (ecase search-type
+      (:breadth-first (breadth-first-search maze))
+      (:depth-first (depth-first-search maze))
+      ((:uniform-cost :a*) (cost-based-search maze queue-type))
+      (:rbfs (recursive-best-first-search maze queue-type)))))
+
+;;(time (solve-maze-heuristically :uniform-cost +romania-map-with-coord+ 'Arad 'Bucharest :heap))

@@ -7,7 +7,9 @@
   :components ((:module "src"
                         :components
                         ((:file "package")
-                         (:file "queue" :depends-on ("package"))))))
+                         (:file "utils" :depends-on ("package"))
+                         (:file "queue" :depends-on ("utils"))
+                         (:file "aima" :depends-on ("queue"))))))
 ;;
 ;;(asdf:compile-system :algorithm-system)
 ;;(asdf:load-system :algorithm-system)
