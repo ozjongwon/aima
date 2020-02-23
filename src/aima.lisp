@@ -289,16 +289,6 @@
      do (push (node-state node) states)
      finally (return states)))
 
-;; (solve-simple-maze :fifo +maze-map+ 's 'g)
-;; (solve-simple-maze :lifo +maze-map+ 's 'g)
-;; (solve-simple-maze :heap +maze-map+ 's 'g)
-;; (solve-simple-maze :fibonacci-heap +maze-map+ 's 'g)
-;;
-;; (solve-simple-maze :fifo +romania-map+ 'Arad 'Bucharest)
-;; (solve-simple-maze :lifo +romania-map+ 'Arad 'Bucharest)
-;; (solve-simple-maze :heap +romania-map+ 'Arad 'Bucharest)
-;; (solve-simple-maze :fibonacci-heap +romania-map+ 'Arad 'Bucharest)
-
 (defstruct (n-puzzle (:include problem))
   (sqrt-n 0 :type fixnum))
 
@@ -451,6 +441,7 @@
 ;; (time (solve-simple-maze :uniform-cost +romania-map-with-coord+ 'Arad 'Bucharest :fibonacci-heap))
 ;; (time (solve-simple-maze :a* +romania-map-with-coord+ 'Arad 'Bucharest :heap))
 ;; (time (solve-simple-maze :a* +romania-map-with-coord+ 'Arad 'Bucharest :fibonacci-heap))
+;; (time (solve-simple-maze :ida* +romania-map-with-coord+ 'Arad 'Bucharest))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defparameter *counter* 0)
