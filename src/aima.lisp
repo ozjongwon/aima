@@ -75,7 +75,7 @@
                                ;; g(n)
                                (state-transition-cost problem parent-state action)
                                ;; h(n), for non A* searches, 0
-                               (if (eq search-type :a*)
+                               (if (member search-type '(:a* :ida*))
                                    (heuristic-function problem parent action child-state)
                                    0))))))
 
@@ -243,7 +243,8 @@
       (:depth-first (depth-first-search maze))
       ((:uniform-cost :a*) (cost-based-search maze search-type queue-type))
       (:rbfs (recursive-best-first-search maze queue-type))
-      (:ids (iterative-deepening-search maze)))))
+      (:ids (iterative-deepening-search maze))
+      (:ida* (ida-star-search maze)))))
 
 (defun get-state-neighbours (transition-model state)
   (first (last (assoc state transition-model))))
@@ -316,7 +317,8 @@
       (:depth-first (depth-first-search puzzle))
       ((:uniform-cost :a*) (cost-based-search puzzle search-type queue-type))
       (:rbfs (recursive-best-first-search puzzle queue-type))
-      (:ids (iterative-deepening-search puzzle)))))
+      (:ids (iterative-deepening-search puzzle))
+      (:ida* (ida-star-search puzzle)))))
 
 ;;
 ;; (time (solve-n-puzzle :breadth-first (n-puzzle-state '(7 2 4 5 0 6 8 3 1)) :fibonacci-heap))
@@ -433,11 +435,14 @@
   (declare (ignore action))
   (with-slots (goal-test transition-model)
       problem
-    (let ((goal-coord (city-coord transition-model goal-test))
-          (parent-coord (city-coord transition-model (node-state parent)))
-          (child-coord (city-coord transition-model child-state)))
-      (floor (- (sqrt (apply #'+ (mapcar #'(lambda (a b) (expt (- a b) 2)) goal-coord child-coord)))
-                (sqrt (apply #'+ (mapcar #'(lambda (a b) (expt (- a b) 2)) goal-coord parent-coord))))))))
+    (let* ((goal-coord (city-coord transition-model goal-test))
+           (child-coord (city-coord transition-model child-state))
+           (child-cost (sqrt (apply #'+ (mapcar #'(lambda (a b) (expt (- a b) 2)) goal-coord child-coord)))))
+      (if parent
+          (let ((parent-coord (city-coord transition-model (node-state parent))))
+            (floor (- (sqrt (apply #'+ (mapcar #'(lambda (a b) (expt (- a b) 2)) goal-coord parent-coord)))
+                      child-cost)))
+          (floor child-cost)))))
 
 ;;
 ;; (time (solve-simple-maze :depth-first +romania-map-with-coord+ 'Arad 'Bucharest))
@@ -493,8 +498,48 @@
       (:depth-first (depth-first-search maze))
       ((:uniform-cost :a*) (cost-based-search maze search-type queue-type))
       (:rbfs (recursive-best-first-search maze queue-type))
-      (:ids (iterative-deepening-search maze)))))
+      (:ids (iterative-deepening-search maze))
+      (:ida* (ida-star-search maze)))))
 
 ;;(time (solve-maze-heuristically :uniform-cost +romania-map-with-coord+ 'Arad 'Bucharest :heap))
 ;;(time (solve-maze-heuristically :a* +romania-map-with-coord+ 'Arad 'Bucharest :heap))
 ;;(time (solve-maze-heuristically :ids +romania-map-with-coord+ 'Arad 'Bucharest :heap))
+
+
+;;;
+(defun ida-star-search (problem)
+  (let* ((initial-state (problem-initial-state problem)))
+    (loop with f-limit = (heuristic-function problem nil nil initial-state)
+       and hash-table = (make-hash-table :test #'equalp)
+       with root = (let ((node (make-node :state initial-state :path-cost f-limit)))
+                     (setf (gethash initial-state hash-table) t)
+                     node)
+       as (next-node new-f-limit) = (multiple-value-list (dfs-contour problem
+                                                                      root
+                                                                      f-limit
+                                                                      hash-table))
+       if next-node
+       return (solution problem next-node)
+       else if (= new-f-limit most-positive-fixnum)
+       return nil
+       else do (setf f-limit new-f-limit))))
+
+(defun dfs-contour (problem node f-limit hash-table)
+  (let ((f (node-path-cost node)))
+    (when (> f f-limit)
+      (return-from dfs-contour (values nil f))))
+  (when (state-satisfies-goal? problem (node-state node))
+    (return-from dfs-contour (values node f-limit)))
+  (loop with next-f-limit = most-positive-fixnum
+     for action in (applicable-actions problem (node-state node))
+     as child = (child-node problem node action :ida*)
+     as child-state = (node-state child)
+     unless (gethash child-state hash-table)
+     do (unless (gethash child-state hash-table)
+          (setf (gethash child-state hash-table) t)
+          (multiple-value-bind (next-node child-f)
+              (dfs-contour problem child f-limit hash-table)
+            (cond (next-node (return-from dfs-contour (values next-node child-f)))
+                  ((< child-f next-f-limit) (setf next-f-limit child-f))))
+          (remhash child-state hash-table))
+     finally (return (values nil next-f-limit))))
