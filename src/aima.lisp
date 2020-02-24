@@ -315,9 +315,8 @@
 ;; (time (solve-n-puzzle :a* (n-puzzle-state '(7 2 4 5 0 6 8 3 1)) :fibonacci-heap))
 ;; (time (solve-n-puzzle :uniform-cost (n-puzzle-state '(7 2 4 5 0 6 8 3 1)) :fibonacci-heap))
 ;; (time (solve-n-puzzle :ids (n-puzzle-state '(7 2 4 5 0 6 8 3 1))))
+;; (time (solve-n-puzzle :ida* (n-puzzle-state '(7 2 4 5 0 6 8 3 1)) :fibonacci-heap))
 ;;
-
-
 
 (defmethod state+action->next-state ((problem n-puzzle) state action)
   ;; action => operation on the blank, 0
