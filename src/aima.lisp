@@ -60,9 +60,12 @@
   state
   (parent nil :type (or null node))
   action
-  (path-cost 0 :type fixnum))
+  ;; g(n)
+  (path-cost 0 :type fixnum)
+  ;; h(n)
+  (heuristic-cost 0 :type fixnum))
 
-(defun child-node (problem parent action &optional search-type)
+(defun child-node (problem parent action)
   (with-slots ((parent-state state) path-cost)
       parent
     (let ((child-state (state+action->next-state problem parent-state action)))
@@ -73,11 +76,8 @@
                  ;; A* f(n) = g(n) + h(n)
                  :path-cost (+ path-cost
                                ;; g(n)
-                               (state-transition-cost problem parent-state action)
-                               ;; h(n), for non A* searches, 0
-                               (if (member search-type '(:a* :ida*))
-                                   (heuristic-function problem parent action child-state)
-                                   0))))))
+                               (state-transition-cost problem parent-state action))
+                 :heuristic-cost (heuristic-function problem parent action child-state)))))
 
 (defstruct (frontier-queue (:constructor %make-frontier-queue))
   (queue nil :type (or heap fibonacci-heap fifo lifo))
@@ -116,12 +116,16 @@
     (gethash state frontier)))
 
 (defmethod update-existing-frontier-node (existing-node new-node)
-  (setf (node-parent existing-node)     (node-parent new-node)
-        (node-action existing-node)     (node-action new-node)
-        (node-path-cost existing-node)  (node-path-cost new-node)))
+  (setf (node-parent existing-node)             (node-parent new-node)
+        (node-action existing-node)             (node-action new-node)
+        (node-path-cost existing-node)          (node-path-cost new-node)
+        (node-heuristic-cost existing-node)     (node-heuristic-cost new-node)))
+
+(defun cost-fn-f (node)
+  (+ (node-path-cost node) (node-heuristic-cost node)))
 
 (defun make-frontier-queue (queue-type)
-  (%make-frontier-queue :queue (make-queue queue-type :min-max-key :min :key-fn #'node-path-cost)))
+  (%make-frontier-queue :queue (make-queue queue-type :min-max-key :min :key-fn #'cost-fn-f)))
 
 (defun general-search (problem queue-type)
   (assert (member queue-type '(:fifo :lifo)))
@@ -148,7 +152,7 @@
 (defun depth-first-search (problem)
   (general-search problem :lifo))
 
-(defun cost-based-search (problem search-type queue-type)
+(defun cost-based-search (problem queue-type)
   ;; queue-type: :fibonacci-heap, :heap
   (let ((frontierq (make-frontier-queue queue-type)))
     (queue-put frontierq (make-node :state (problem-initial-state problem)))
@@ -159,12 +163,12 @@
        return (solution problem node)
        else
        do (loop for action in (applicable-actions problem (node-state node))
-             as child = (child-node problem node action search-type)
+             as child = (child-node problem node action)
              if (ready-to-explore? frontierq child)
              do (queue-put frontierq child)
              else
              do (when-let ((existing-node (peek-frontier-node-by-state frontierq (node-state child))))
-                  (when (< (node-path-cost child) (node-path-cost existing-node))
+                  (when (< (cost-fn-f child) (cost-fn-f existing-node))
                     (update-existing-frontier-node existing-node child)))))))
 
 ;;;;
@@ -241,8 +245,8 @@
     (ecase search-type
       (:breadth-first (breadth-first-search maze))
       (:depth-first (depth-first-search maze))
-      ((:uniform-cost :a*) (cost-based-search maze search-type queue-type))
-      (:rbfs (recursive-best-first-search maze queue-type))
+      ((:uniform-cost :a*) (cost-based-search maze queue-type))
+      (:rbfs (recursive-best-first-search maze))
       (:ids (iterative-deepening-search maze))
       (:ida* (ida-star-search maze)))))
 
@@ -305,8 +309,8 @@
     (ecase search-type
       (:breadth-first (breadth-first-search puzzle))
       (:depth-first (depth-first-search puzzle))
-      ((:uniform-cost :a*) (cost-based-search puzzle search-type queue-type))
-      (:rbfs (recursive-best-first-search puzzle queue-type))
+      ((:uniform-cost :a*) (cost-based-search puzzle queue-type))
+      (:rbfs (recursive-best-first-search puzzle))
       (:ids (iterative-deepening-search puzzle))
       (:ida* (ida-star-search puzzle)))))
 
@@ -421,17 +425,13 @@
   (second (assoc name map)))
 
 (defmethod heuristic-function ((problem romania-maze) parent action child-state)
-  (declare (ignore action))
+  (declare (ignore action parent))
   (with-slots (goal-test transition-model)
       problem
     (let* ((goal-coord (city-coord transition-model goal-test))
            (child-coord (city-coord transition-model child-state))
            (child-cost (sqrt (apply #'+ (mapcar #'(lambda (a b) (expt (- a b) 2)) goal-coord child-coord)))))
-      (if parent
-          (let ((parent-coord (city-coord transition-model (node-state parent))))
-            (floor (- (sqrt (apply #'+ (mapcar #'(lambda (a b) (expt (- a b) 2)) goal-coord parent-coord)))
-                      child-cost)))
-          (floor child-cost)))))
+      (floor child-cost))))
 
 ;;
 ;; (time (solve-simple-maze :depth-first +romania-map-with-coord+ 'Arad 'Bucharest))
@@ -443,51 +443,66 @@
 ;; (time (solve-simple-maze :ida* +romania-map-with-coord+ 'Arad 'Bucharest))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(defparameter *counter* 0)
+(defun recursive-best-first-search (problem)
+  (let ((initial-state (problem-initial-state problem)))
+   (rbfs problem
+         (make-node :state initial-state :heuristic-cost (heuristic-function problem nil nil initial-state))
+         most-positive-fixnum)))
 
-(defun recursive-best-first-search (problem queue-type)
-  (setf *counter* 0)
-  (rbfs problem (make-node :state (problem-initial-state problem)) most-positive-fixnum queue-type))
+(defun %get-sorted-successors (problem node)
+  (loop for action in (applicable-actions problem (node-state node))
+     as child = (child-node problem node action)
+     collect child into successors
+     finally (return (sort successors #'< :key #'cost-fn-f))))
 
-(defun rbfs (problem node f-limit queue-type)
-  (incf *counter*)
+(defun %update-g-h (node f)
+  (with-slots (path-cost heuristic-cost)
+      node
+    (let ((new-h (- f (+ path-cost heuristic-cost))))
+      (when (plusp new-h)
+        (incf heuristic-cost new-h)))))
+
+(defun rbfs (problem node f-limit)
   (when (state-satisfies-goal? problem (node-state node))
-    (return-from rbfs (solution problem node)))
-  (let ((node-f (node-path-cost node))
-        (successors (make-queue queue-type :min-max-key :min :key-fn #'node-path-cost)))
-    ;; Build successors
-    (loop for action in (applicable-actions problem (node-state node))
-       as successor = (child-node problem node action)
-       as cost-f = (node-path-cost successor)
-       when (< cost-f node-f)
-       do (setf (node-path-cost successor) node-f)
-       do (queue-put successors successor))
-    (when (queue-empty? successors)
-      (return-from rbfs `(:failure ,most-positive-fixnum)))
-    ;; main
-    (loop until (queue-empty? successors)
-       as best = (queue-get successors)
-       as best-f = (node-path-cost best)
-       when (> best-f f-limit)
-       return `(:failure ,best-f)
-       do (when-let ((alternative (and (not (queue-empty? successors))
-                                       (node-path-cost (queue-get successors)))))
-            (let* ((result (rbfs problem best (min f-limit alternative) queue-type)))
-              (unless (eq (first result) :failure)
-                (return-from rbfs result))))
-         finally (return best)
-         #+XX(let* ((alternative (node-path-cost (queue-get successors)))
-                    (result (rbfs problem best (min f-limit alternative) queue-type)))
-               (unless (eq (first result) :failure)
-                 (return-from rbfs result))))))
+    (return-from rbfs (values (solution problem node) f-limit)))
 
+  (loop with next-f-limit = f-limit
+     and successors = (%get-sorted-successors problem node)
+     initially (unless successors
+                 (%update-g-h node most-positive-fixnum)
+                 (return-from rbfs (values nil most-positive-fixnum)))
+     as child1 = (first successors)
+     and child2 = (second successors)
+     as cost-f1 = (cost-fn-f child1)
+
+     when child2
+     do (setf next-f-limit (cost-fn-f child2))
+
+     if (< cost-f1 f-limit)
+     do
+       (multiple-value-bind (result f)
+           (rbfs problem child1 next-f-limit)
+         (if result
+             (return-from rbfs (values result f))
+             (progn
+               (%update-g-h child1 f)
+               (setf next-f-limit f
+                     successors (sort successors #'< :key #'cost-fn-f)))))
+     else
+     do
+       (%update-g-h node (if (= cost-f1 f-limit)
+                             (1+ cost-f1)
+                             cost-f1))
+       (return-from rbfs (values nil cost-f1))))
+
+;;;;;;;;;;;;
 (defun solve-maze-heuristically (search-type map start end &optional queue-type)
   (let ((maze (make-romania-maze :search-type search-type :initial-state start :goal-test end :transition-model map)))
     (ecase search-type
       (:breadth-first (breadth-first-search maze))
       (:depth-first (depth-first-search maze))
-      ((:uniform-cost :a*) (cost-based-search maze search-type queue-type))
-      (:rbfs (recursive-best-first-search maze queue-type))
+      ((:uniform-cost :a*) (cost-based-search maze queue-type))
+      (:rbfs (recursive-best-first-search maze))
       (:ids (iterative-deepening-search maze))
       (:ida* (ida-star-search maze)))))
 
@@ -501,7 +516,7 @@
   (let* ((initial-state (problem-initial-state problem)))
     (loop with f-limit = (heuristic-function problem nil nil initial-state)
        and hash-table = (make-hash-table :test #'equalp)
-       with root = (let ((node (make-node :state initial-state :path-cost f-limit)))
+       with root = (let ((node (make-node :state initial-state :heuristic-cost f-limit)))
                      (setf (gethash initial-state hash-table) t)
                      node)
        as (next-node new-f-limit) = (multiple-value-list (dfs-contour problem
@@ -515,14 +530,14 @@
        else do (setf f-limit new-f-limit))))
 
 (defun dfs-contour (problem node f-limit hash-table)
-  (let ((f (node-path-cost node)))
+  (let ((f (cost-fn-f node)))
     (when (> f f-limit)
       (return-from dfs-contour (values nil f))))
   (when (state-satisfies-goal? problem (node-state node))
     (return-from dfs-contour (values node f-limit)))
   (loop with next-f-limit = most-positive-fixnum
      for action in (applicable-actions problem (node-state node))
-     as child = (child-node problem node action :ida*)
+     as child = (child-node problem node action)
      as child-state = (node-state child)
      unless (gethash child-state hash-table)
      do (unless (gethash child-state hash-table)
