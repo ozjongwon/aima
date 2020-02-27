@@ -247,6 +247,7 @@
       (:depth-first (depth-first-search maze))
       ((:uniform-cost :a*) (cost-based-search maze queue-type))
       (:rbfs (recursive-best-first-search maze))
+      (:pbfs (prioritised-best-first-search maze))
       (:ids (iterative-deepening-search maze))
       (:ida* (ida-star-search maze)))))
 
@@ -311,6 +312,7 @@
       (:depth-first (depth-first-search puzzle))
       ((:uniform-cost :a*) (cost-based-search puzzle queue-type))
       (:rbfs (recursive-best-first-search puzzle))
+      (:pbfs (prioritised-best-first-search puzzle))
       (:ids (iterative-deepening-search puzzle))
       (:ida* (ida-star-search puzzle)))))
 
@@ -426,6 +428,9 @@
 
 (defmethod heuristic-function ((problem romania-maze) parent action child-state)
   (declare (ignore action parent))
+  (cdr (assoc child-state '((ARAD . 366) (BUCHAREST . 0) (CRAIOVA . 160) (Dobreta . 242) (EFORIE . 161) (FAGARAS . 176) (GIURGIU . 77) (HIRSOVA . 151) (IASI . 226) (LUGOJ . 244) (MEHADIA . 241) (NEAMT . 234) (ORADEA . 380) (PITESTI . 100) (RIMNICU . 193) (SIBIU . 253) (TIMISOARA . 329) (URZICENI . 80) (VASLUI . 199) (ZERIND . 374))))
+
+  #+XXX
   (with-slots (goal-test transition-model)
       problem
     (let* ((goal-coord (city-coord transition-model goal-test))
@@ -463,6 +468,7 @@
         (incf heuristic-cost new-h)))))
 
 (defun rbfs (problem node f-limit)
+  (format T "~& 1 *** ~A(~D), Limit: ~D" (node-state node) (cost-fn-f node) f-limit)
   (when (state-satisfies-goal? problem (node-state node))
     (return-from rbfs (values (solution problem node) f-limit)))
 
@@ -495,6 +501,118 @@
                              cost-f1))
        (return-from rbfs (values nil cost-f1))))
 
+(defun %enqueue-children&get-top-two (problem pq node f-limit)
+  (let ((successors (%get-sorted-successors problem node)))
+    (loop for child in successors
+       while (< (cost-fn-f child) f-limit)
+       do (queue-put pq child))
+    (values (first successors) (second successors))))
+
+#+XXX
+(defun prioritised-best-first-search (problem)
+  (let* ((pq (make-queue :heap :min-max-key :min :key-fn #'cost-fn-f))
+         (initial-state (problem-initial-state problem))
+         (root (make-node :state initial-state :heuristic-cost (heuristic-function problem nil nil initial-state))))
+    (when (state-satisfies-goal? problem initial-state)
+      (return-from prioritised-best-first-search (solution problem root)))
+    (multiple-value-bind (child1 child2)
+        (%enqueue-children&get-top-two problem pq root most-positive-fixnum)
+      ;; 2. General loop
+      (loop with f-limit = (if child2
+                               (cost-fn-f child2)
+                               most-positive-fixnum)
+         do (format t "~&1 *** ~D ~A(~D) ~A(~D)" f-limit (node-state child1) (cost-fn-f child1)
+                    (node-state child2) (cost-fn-f child2))
+
+         when (state-satisfies-goal? problem (node-state child1))
+         do (return-from prioritised-best-first-search (solution problem child1))
+
+         do (multiple-value-setq (child1 child2) ;; f-limit=447, rimnicu + fagaras
+              (%enqueue-children&get-top-two problem pq child1 f-limit))
+           (format t "~&    2 *** ~D ~A(~D) ~A(~D)" f-limit (node-state child1) (cost-fn-f child1)
+                   (node-state child2) (cost-fn-f child2))
+
+         if child1
+         do (let ((child1-cost-f (cost-fn-f child1)))
+              (cond ((< f-limit child1-cost-f) (let ((parent (node-parent child1)))
+                                                 (loop as parent-q = (queue-get pq)
+                                                    do (format T "~& XXXXX ~A(~D) ~A(~D)"
+                                                               (node-state parent) (cost-fn-f parent)
+                                                               (node-state parent-q) (cost-fn-f parent-q))
+                                                    until (eq  parent parent-q))
+                                                 (format t "~&      2-3 ~D ~A *** ~A(~D)" child1-cost-f
+                                                         (node-state child1) (node-state parent) (cost-fn-f parent))
+                                                 (%update-g-h parent child1-cost-f)
+                                                 (queue-put pq parent)
+                                                 (setf child1 (queue-get pq)
+                                                       child2 (queue-get pq))
+                                                 (format t "~&       3 *** ~D ~A(~D) ~A(~D) ~A(~D)" f-limit (node-state child1) (cost-fn-f child1) (node-state child2) (cost-fn-f child2) (node-state parent) (cost-fn-f parent))))
+                    (child2 (setf f-limit (cost-fn-f child2))))
+              )
+         else              ;; no children
+         do (queue-get pq) ;; Remove the parent from the queue
+           (setf child1 (queue-get pq)
+                 child2 (queue-get pq))))))
+
+(defun %enqueue-successors (pq problem parent f-limit)
+  (let ((successors (sort (mapcar #'(lambda (action)
+                                 (child-node problem parent action))
+                             (applicable-actions problem (node-state parent)))
+                          #'<
+                          :key #'cost-fn-f)))
+    (loop with start-size = (queue-n pq)
+       for successor in successors
+       when (< (cost-fn-f successor) f-limit)
+       do (queue-put pq successor)
+       finally (return (list (first successors) (second successors) (- (queue-n pq) start-size))))))
+
+(defun prioritised-best-first-search (problem)
+  (let* ((pq (make-queue :fibonacci-heap :min-max-key :min :key-fn #'cost-fn-f))
+         (initial-state (problem-initial-state problem))
+         (root (make-node :state initial-state :heuristic-cost (heuristic-function problem nil nil initial-state))))
+    (when (state-satisfies-goal? problem initial-state)
+      (return-from prioritised-best-first-search (solution problem root)))
+    (loop with f-limit = most-positive-fixnum
+       and parent = root
+       as (successor1 successor2 n-successors) = (%enqueue-successors pq problem parent f-limit)
+
+       do (format t "~&1 *** Parent: ~A(~D) +  Limit: ~D ==> Child1: ~A(~D), Child2: ~A(~D)"
+                  (node-state parent) (cost-fn-f parent) f-limit
+                  (node-state successor1) (cost-fn-f successor1)
+                  (node-state successor2) (cost-fn-f successor2))
+       ;; n-successors
+       ;;       0 => move to a next sibling
+       ;;       1 => move to a next child
+       ;;     > 1 => next child + push parent
+       when (state-satisfies-goal? problem (node-state parent))
+       return (solution problem parent)
+
+       if (= n-successors 0)
+       do (let ((sibling1 (queue-get pq)))
+            (when successor1
+              (format t "~&    2-1 *** Update Limit ~D -> ~D"
+                      f-limit (cost-fn-f successor1))
+              (setf f-limit (cost-fn-f successor1)))
+            (format t "~&    2-2 *** Remove parent and set sibling ~A(~D)"
+                    (node-state sibling1) (cost-fn-f sibling1))
+            (setf parent sibling1))
+       else if (= n-successors 1)
+       do (setf parent (queue-get pq))
+         (format t "~&    3-1 *** Remove parent")
+       else
+       do (let ((next-cost-f (cost-fn-f successor2))
+                (saved-parent parent))
+            (%update-g-h parent next-cost-f)
+;;            (queue-put pq parent)
+
+            (setf parent (queue-get pq)
+                  f-limit next-cost-f)
+            (unless (eq parent saved-parent)
+              (format t "~&    4-1 *** Save parent ~A(~D) & update Limit: ~D -> ~D"
+                      (node-state saved-parent) (cost-fn-f saved-parent)
+                      f-limit next-cost-f)
+              (queue-put pq saved-parent))))))
+
 ;;;;;;;;;;;;
 (defun solve-maze-heuristically (search-type map start end &optional queue-type)
   (let ((maze (make-romania-maze :search-type search-type :initial-state start :goal-test end :transition-model map)))
@@ -503,6 +621,7 @@
       (:depth-first (depth-first-search maze))
       ((:uniform-cost :a*) (cost-based-search maze queue-type))
       (:rbfs (recursive-best-first-search maze))
+      (:pbfs (prioritised-best-first-search maze))
       (:ids (iterative-deepening-search maze))
       (:ida* (ida-star-search maze)))))
 
