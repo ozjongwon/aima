@@ -89,6 +89,11 @@
         (%resize heap (floor vlen 2)))
       top-elem)))
 
+(defmethod queue-n ((heap heap))
+  (with-slots (n)
+      heap
+    n))
+
 ;; (setf h1 (make-queue :heap :min-max-key :max :key-fn #'identity))
 ;; (dolist (elem '("O" "R" "T" "E" "X" "A" "M" "P" "L" "E"))
 ;;   (queue-put h1 elem))
@@ -254,6 +259,11 @@
             (fibonacci-node-degree root) 0))
     (fibonacci-node-elem root)))
 
+(defmethod queue-n ((heap fibonacci-heap))
+  (with-slots (n)
+      heap
+    n))
+
 ;;;
 ;;; FIFO
 ;;;
@@ -277,6 +287,10 @@
     (decf n)
     (pop list)))
 
+(defmethod queue-n ((queue fifo))
+  (with-slots (n)
+      queue
+    n))
 ;;;
 ;;; LIFO
 ;;;
@@ -299,6 +313,11 @@
     (assert (plusp n) nil "LIFO underflow")
     (decf n)
     (pop list)))
+
+(defmethod queue-n ((queue lifo))
+  (with-slots (n)
+      queue
+    n))
 
 
 ;; (setf fh1 (make-queue :fibonacci-heap :min-max-key :max :key-fn #'identity))
